@@ -371,6 +371,7 @@ namespace NLog.Targets
             this.LingerTime = 1000;
             this.EmitStackTraceWhenAvailable = false;
             this.Tag = Assembly.GetCallingAssembly().GetName().Name;
+            this.ExcludeProperties = new HashSet<string>();
         }
     }
 }
