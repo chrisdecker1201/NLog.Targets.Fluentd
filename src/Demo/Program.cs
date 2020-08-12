@@ -15,27 +15,31 @@
 // limitations under the License.
 
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using NLog;
+using NLog.Targets.Fluentd;
 
 namespace Demo
 {
-    class Program
+    static class Program
     {
-        static void Main(string[] args)
+        static void Main()
         {
-            var config = new NLog.Config.LoggingConfiguration();
-            using (var fluentdTarget = new NLog.Targets.Fluentd())
+            try
             {
-                fluentdTarget.Layout = new NLog.Layouts.SimpleLayout("${longdate}|${level}|${callsite}|${logger}|${message}");
-                config.AddTarget("fluentd", fluentdTarget);
-                config.LoggingRules.Add(new NLog.Config.LoggingRule("demo", LogLevel.Debug, fluentdTarget));
-                var loggerFactory = new LogFactory(config);
-                var logger = loggerFactory.GetLogger("demo");
-                logger.Info("Hello World!");
+                var config = new NLog.Config.LoggingConfiguration();
+                using (var fluentdTarget = new Fluentd())
+                {
+                    fluentdTarget.Layout = new NLog.Layouts.SimpleLayout("${longdate}|${level}|${callsite}|${logger}|${message}");
+                    config.AddTarget("fluentd", fluentdTarget);
+                    config.LoggingRules.Add(new NLog.Config.LoggingRule("demo", LogLevel.Debug, fluentdTarget));
+                    var loggerFactory = new LogFactory(config);
+                    var logger = loggerFactory.GetLogger("demo");
+                    logger.Info("Hello World!");
+                }
+            }
+            catch (NLogConfigurationException exception)
+            {
+                Console.WriteLine(exception);
             }
         }
     }

@@ -17,169 +17,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Net.Sockets;
 using System.Diagnostics;
 using System.Reflection;
-using MsgPack;
-using MsgPack.Serialization;
 
-namespace NLog.Targets
+namespace NLog.Targets.Fluentd
 {
-    internal class OrdinaryDictionarySerializer : MessagePackSerializer<IDictionary<string, object>>
-    {
-        private readonly SerializationContext embeddedContext;
-
-        internal OrdinaryDictionarySerializer(SerializationContext ownerContext, SerializationContext embeddedContext) : base(ownerContext)
-        {
-            this.embeddedContext = embeddedContext ?? ownerContext;
-        }
-
-        protected override void PackToCore(Packer packer, IDictionary<string, object> objectTree)
-        {
-            packer.PackMapHeader(objectTree);
-            foreach (KeyValuePair<string, object> pair in objectTree)
-            {
-                packer.PackString(pair.Key);
-                if (pair.Value == null)
-                {
-                    packer.PackNull();
-                }
-                else
-                {
-                    packer.Pack(pair.Value, this.embeddedContext);
-                }
-            }
-        }
-
-        protected void UnpackTo(Unpacker unpacker, IDictionary<string, object> dict, long mapLength)
-        {
-            for (long i = 0; i < mapLength; i++)
-            {
-                string key;
-                MessagePackObject value;
-                if (!unpacker.ReadString(out key))
-                {
-                    throw new InvalidMessagePackStreamException("string expected for a map key");
-                }
-                if (!unpacker.ReadObject(out value))
-                {
-                    throw new InvalidMessagePackStreamException("unexpected EOF");
-                }
-                if (unpacker.LastReadData.IsNil)
-                {
-                    dict.Add(key, null);
-                }
-                else if (unpacker.IsMapHeader)
-                {
-                    long innerMapLength = value.AsInt64();
-                    var innerDict = new Dictionary<string, object>();
-                    UnpackTo(unpacker, innerDict, innerMapLength);
-                    dict.Add(key, innerDict);
-                }
-                else if (unpacker.IsArrayHeader)
-                {
-                    long innerArrayLength = value.AsInt64();
-                    var innerArray = new List<object>();
-                    UnpackTo(unpacker, innerArray, innerArrayLength);
-                    dict.Add(key, innerArray);
-                }
-                else
-                {
-                    dict.Add(key, value.ToObject());
-                }
-            }
-        }
-
-        protected void UnpackTo(Unpacker unpacker, IList<object> array, long arrayLength)
-        {
-            for (long i = 0; i < arrayLength; i++)
-            {
-                MessagePackObject value;
-                if (!unpacker.ReadObject(out value))
-                {
-                    throw new InvalidMessagePackStreamException("unexpected EOF");
-                }
-                if (unpacker.IsMapHeader)
-                {
-                    long innerMapLength = value.AsInt64();
-                    var innerDict = new Dictionary<string, object>();
-                    UnpackTo(unpacker, innerDict, innerMapLength);
-                    array.Add(innerDict);
-                }
-                else if (unpacker.IsArrayHeader)
-                {
-                    long innerArrayLength = value.AsInt64();
-                    var innerArray = new List<object>();
-                    UnpackTo(unpacker, innerArray, innerArrayLength);
-                    array.Add(innerArray);
-                }
-                else
-                {
-                    array.Add(value.ToObject());
-                }
-            }
-        }
-
-        public void UnpackTo(Unpacker unpacker, IDictionary<string, object> collection)
-        {
-            long mapLength;
-            if (!unpacker.ReadMapLength(out mapLength))
-            {
-                throw new InvalidMessagePackStreamException("map header expected");
-            }
-            UnpackTo(unpacker, collection, mapLength);
-        }
-
-        protected override IDictionary<string, object> UnpackFromCore(Unpacker unpacker)
-        {
-            if (!unpacker.IsMapHeader)
-            {
-                throw new InvalidMessagePackStreamException("map header expected");
-            }
-
-            var retval = new Dictionary<string, object>();
-            UnpackTo(unpacker, retval);
-            return retval;
-        }
-
-        public void UnpackTo(Unpacker unpacker, object collection)
-        {
-            var dictionary = collection as IDictionary<string, object>;
-            if (dictionary == null)
-                throw new NotSupportedException();
-            UnpackTo(unpacker, dictionary);
-        }
-    }
-
-    internal class FluentdEmitter
-    {
-        private static DateTime unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        private readonly Packer packer;
-        private readonly SerializationContext serializationContext;
-        private readonly Stream destination;
-
-        public void Emit(DateTime timestamp, string tag, IDictionary<string, object> data)
-        {
-            long unixTimestamp = timestamp.ToUniversalTime().Subtract(unixEpoch).Ticks / 10000000;
-            this.packer.PackArrayHeader(3);
-            this.packer.PackString(tag, Encoding.UTF8);
-            this.packer.Pack((ulong)unixTimestamp);
-            this.packer.Pack(data, serializationContext);
-            this.destination.Flush();    // Change to packer.Flush() when packer is upgraded
-        }
-
-        public FluentdEmitter(Stream stream)
-        {
-            this.destination = stream;
-            this.packer = Packer.Create(destination);
-            var embeddedContext  = new SerializationContext(this.packer.CompatibilityOptions);
-            embeddedContext.Serializers.Register(new OrdinaryDictionarySerializer(embeddedContext, null));
-            this.serializationContext = new SerializationContext(PackerCompatibilityOptions.PackBinaryAsRaw);
-            this.serializationContext.Serializers.Register(new OrdinaryDictionarySerializer(this.serializationContext, embeddedContext));
-        }
-    }
-
     [Target("Fluentd")]
     public class Fluentd : NLog.Targets.TargetWithLayout
     {
@@ -214,11 +57,6 @@ namespace NLog.Targets
         private Stream stream;
 
         private FluentdEmitter emitter;
-
-        protected override void InitializeTarget()
-        {
-            base.InitializeTarget();
-        }
 
         private void InitializeClient()
         {
@@ -347,16 +185,14 @@ namespace NLog.Targets
             }
         }
 
-        private static object SerializePropertyValue(string propertyKey, object propertyValue)
+        private static object SerializePropertyValue(object propertyValue)
         {
             if (propertyValue == null || Convert.GetTypeCode(propertyValue) != TypeCode.Object || propertyValue is decimal)
             {
                 return propertyValue;   // immutable
             }
-            else
-            {
-                return propertyValue.ToString();
-            }
+
+            return propertyValue.ToString();
         }
 
         public Fluentd()
